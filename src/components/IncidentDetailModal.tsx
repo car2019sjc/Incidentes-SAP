@@ -1,7 +1,8 @@
-import React from 'react';
-import { X, Calendar, User, Tag, AlertCircle, Clock, CheckCircle, Users, FileText, MessageSquare, CheckSquare, Square } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Calendar, User, Tag, AlertCircle, Clock, CheckCircle, Users, FileText, MessageSquare, CheckSquare, Square, Bot } from 'lucide-react';
 import { Incident } from '../types/incident';
 import { formatDate, parseDate } from '../utils/dateUtils';
+import { AIAnalysisModal } from './AIAnalysisModal';
 
 interface IncidentDetailModalProps {
   isOpen: boolean;
@@ -28,6 +29,10 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
   isSelected = false,
   onToggleSelection
 }) => {
+  const [showAIAnalysis, setShowAIAnalysis] = useState(false);
+  const [selectedString, setSelectedString] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+
   if (!isOpen || !incident) return null;
 
   const getStateColor = (state: string) => {
@@ -72,6 +77,15 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     if (!dateString || dateString === 'N/A') return 'Não informado';
     const date = parseDate(dateString);
     return date ? formatDate(date) : 'Data inválida';
+  };
+
+  const handleAIAnalysis = () => {
+    // Usar a descrição como string padrão ou o número do incidente
+    const defaultString = incident.description || incident.short_description || incident.number;
+    setSelectedString(defaultString);
+    // Usar assignment group como categoria padrão
+    setSelectedCategory(incident.assignment_group || 'Geral');
+    setShowAIAnalysis(true);
   };
 
   return (
@@ -125,6 +139,21 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Botão de Análise de IA */}
+            <div className={`${onToggleSelection ? 'ml-3' : 'ml-6'}`}>
+              <button
+                onClick={handleAIAnalysis}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-lg border-2 transition-all hover:shadow-sm ${
+                  darkMode
+                    ? 'bg-purple-900/30 border-purple-600/70 text-purple-300 hover:border-purple-500'
+                    : 'bg-purple-50 border-purple-300 text-purple-700 hover:border-purple-400'
+                }`}
+              >
+                <Bot className="h-4 w-4" />
+                <span className="text-sm font-medium">Análise IA</span>
+              </button>
+            </div>
           </div>
           <div className="flex items-center space-x-2">
             {/* Navigation buttons */}
@@ -421,6 +450,16 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Modal de Análise de IA */}
+      <AIAnalysisModal
+        isOpen={showAIAnalysis}
+        onClose={() => setShowAIAnalysis(false)}
+        incident={incident}
+        selectedString={selectedString}
+        category={selectedCategory}
+        darkMode={darkMode}
+      />
     </div>
   );
 };
