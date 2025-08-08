@@ -1,0 +1,859 @@
+import React, { useMemo, useState } from 'react';
+
+import { X, BarChart3, PieChartIcon, TrendingUp, Users, AlertCircle } from 'lucide-react';
+import { Incident } from '../types/incident';
+import { incidentContainsString } from '../utils/stringUtils';
+
+interface StringCategoryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  selectedString: string;
+  incidents: Incident[];
+  darkMode?: boolean;
+}
+
+interface CategoryData {
+  category: string;
+  count: number;
+  incidents: Incident[];
+  percentage: number;
+  color: string;
+}
+
+const COLORS = [
+  '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
+  '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
+  '#14B8A6', '#F43F5E', '#8B5A2B', '#6D28D9', '#DC2626'
+];
+
+export const StringCategoryModal: React.FC<StringCategoryModalProps> = ({
+  isOpen,
+  onClose,
+  selectedString,
+  incidents,
+  darkMode = false
+}) => {
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [showIncidentsList, setShowIncidentsList] = useState<boolean>(false);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+
+  // Reset state quando o modal for fechado
+  const handleClose = () => {
+    setSelectedCategory(null);
+    setShowIncidentsList(false);
+    setSelectedIncident(null);
+    onClose();
+  };
+
+  // Lidar com clique no incidente individual
+  const handleIncidentClick = (incident: Incident) => {
+    setSelectedIncident(incident);
+  };
+
+
+
+  const categoryData = useMemo(() => {
+    if (!selectedString) return [];
+
+    // Filtrar incidentes que contêm a string selecionada
+    const relatedIncidents = incidents.filter(incident => 
+      incidentContainsString(incident, selectedString)
+    );
+    
+    console.log('📊 StringCategoryModal:', selectedString, 'incidentes:', relatedIncidents.length);
+
+    if (relatedIncidents.length === 0) return [];
+
+    // Agrupar por categoria
+    const categoryMap = new Map<string, Incident[]>();
+    
+    relatedIncidents.forEach(incident => {
+      const category = incident.category || 'Sem Categoria';
+      if (!categoryMap.has(category)) {
+        categoryMap.set(category, []);
+      }
+      categoryMap.get(category)!.push(incident);
+    });
+
+    // Converter para array e calcular percentuais
+    const total = relatedIncidents.length;
+    const data: CategoryData[] = Array.from(categoryMap.entries())
+      .map(([category, incidents], index) => ({
+        category,
+        count: incidents.length,
+        incidents,
+        percentage: (incidents.length / total) * 100,
+        color: COLORS[index % COLORS.length]
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    console.log('✅ Categorias:', data.length, 'processadas');
+    
+    return data;
+  }, [incidents, selectedString]);
+
+  const totalIncidents = categoryData.reduce((sum, item) => sum + item.count, 0);
+
+  const getStatusSummary = (incidents: Incident[]) => {
+    // Primeiro, vamos identificar todos os status únicos
+    const uniqueStates = [...new Set(incidents.map(i => i.state).filter(Boolean))];
+    console.log('🔍 Status únicos encontrados:', uniqueStates);
+    console.log('📊 Total de incidentes analisados:', incidents.length);
+    
+    // Contagem detalhada por status específico
+    const detailedStatusCount = uniqueStates.reduce((acc, state) => {
+      acc[state] = incidents.filter(i => i.state === state).length;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    console.log('📋 Contagem detalhada por status:', detailedStatusCount);
+    
+    // Agrupamento tradicional mais alguns novos status comuns
+    const statusCount = {
+      open: incidents.filter(i => 
+        i.state === 'Open' || 
+        i.state === 'In Progress' || 
+        i.state === 'New' ||
+        i.state === 'Active'
+      ).length,
+      resolved: incidents.filter(i => i.state === 'Resolved').length,
+      closed: incidents.filter(i => i.state === 'Closed').length,
+      pending: incidents.filter(i => 
+        i.state === 'Pending' || 
+        i.state === 'Awaiting User Info' ||
+        i.state === 'On Hold'
+      ).length,
+      cancelled: incidents.filter(i => 
+        i.state === 'Cancelled' || 
+        i.state === 'Canceled'
+      ).length,
+      other: incidents.filter(i => 
+        !['Open', 'In Progress', 'New', 'Active', 'Resolved', 'Closed', 'Pending', 'Awaiting User Info', 'On Hold', 'Cancelled', 'Canceled'].includes(i.state)
+      ).length,
+      critical: incidents.filter(i => 
+        i.priority?.toLowerCase().includes('critical') || 
+        i.priority?.toLowerCase().includes('high') ||
+        i.priority?.includes('1') || 
+        i.priority?.includes('2')
+      ).length,
+      // Status específicos detalhados
+      detailed: detailedStatusCount
+    };
+    
+    // Verificação de integridade
+    const totalCalculated = statusCount.open + statusCount.resolved + statusCount.closed + statusCount.pending + statusCount.cancelled + statusCount.other;
+    console.log('✅ Verificação de integridade:');
+    console.log('- Total de incidentes:', incidents.length);
+    console.log('- Total calculado:', totalCalculated);
+    console.log('- Diferença:', incidents.length - totalCalculated);
+    
+    return statusCount;
+  };
+
+  const overallStatus = useMemo(() => {
+    const allIncidents = categoryData.flatMap(cat => cat.incidents);
+    return getStatusSummary(allIncidents);
+  }, [categoryData]);
+
+  // Obter incidentes da categoria selecionada
+  const selectedCategoryIncidents = useMemo(() => {
+    if (!selectedCategory) return [];
+    
+    const categoryInfo = categoryData.find(cat => cat.category === selectedCategory);
+    return categoryInfo?.incidents || [];
+  }, [selectedCategory, categoryData]);
+
+  // Lidar com clique na barra/categoria
+  const handleCategoryClick = (category: string) => {
+    setSelectedCategory(category);
+    setShowIncidentsList(true);
+  };
+
+  if (!isOpen) return null;
+  if (!selectedString) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className={`rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden ${
+        darkMode ? 'bg-gray-800' : 'bg-white'
+      }`}>
+        {/* Header */}
+        <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className={`p-2 rounded-lg ${darkMode ? 'bg-blue-900' : 'bg-blue-100'}`}>
+                <BarChart3 className={`h-6 w-6 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+              </div>
+              <div>
+                <h2 className={`text-xl font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  Análise Dinâmica por Categoria
+                </h2>
+                <div className="flex items-center space-x-2 mt-2">
+                  <span className={`text-xs font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    String analisada:
+                  </span>
+                  <div className={`px-4 py-2 rounded-full border-2 animate-pulse ${
+                    darkMode 
+                      ? 'bg-gradient-to-r from-blue-900 to-purple-900 border-blue-400 shadow-blue-400/30' 
+                      : 'bg-gradient-to-r from-blue-100 to-purple-100 border-blue-500 shadow-blue-500/30'
+                  } shadow-lg hover:shadow-xl transition-all duration-300`}>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-base">🔍</span>
+                      <span className={`text-base font-black tracking-wide ${
+                        darkMode ? 'text-blue-200' : 'text-blue-800'
+                      }`}>
+                        "{selectedString}"
+                      </span>
+                      <span className="text-base">🎯</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleClose}
+              className={`p-2 rounded-lg transition-colors ${
+                darkMode 
+                  ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' 
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Estatísticas Resumidas */}
+          {categoryData.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div className={`p-3 rounded-lg ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <div className="flex items-center space-x-2">
+                  <Users className={`h-4 w-4 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                  <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Total de Incidentes
+                  </span>
+                </div>
+                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {totalIncidents}
+                </p>
+              </div>
+              <div className={`p-3 rounded-lg ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <div className="flex items-center space-x-2">
+                  <BarChart3 className={`h-4 w-4 ${darkMode ? 'text-green-400' : 'text-green-600'}`} />
+                  <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Categorias
+                  </span>
+                </div>
+                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {categoryData.length}
+                </p>
+              </div>
+              <div className={`p-3 rounded-lg ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <div className="flex items-center space-x-2">
+                  <TrendingUp className={`h-4 w-4 ${darkMode ? 'text-purple-400' : 'text-purple-600'}`} />
+                  <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Maior Categoria
+                  </span>
+                </div>
+                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {categoryData[0]?.count || 0}
+                </p>
+              </div>
+              <div className={`p-3 rounded-lg ${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className={`h-4 w-4 ${darkMode ? 'text-red-400' : 'text-red-600'}`} />
+                  <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Abertos
+                  </span>
+                </div>
+                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {overallStatus.open}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Banner de Destaque da String */}
+          {categoryData.length > 0 && (
+            <div className={`mt-4 mb-4 p-4 rounded-xl border-2 ${
+              darkMode 
+                ? 'bg-gradient-to-r from-indigo-900/50 to-purple-900/50 border-indigo-400/50 shadow-indigo-400/10' 
+                : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-400 shadow-indigo-400/20'
+            } shadow-xl`}>
+              <div className="flex items-center justify-center space-x-3">
+                <div className={`p-2 rounded-full ${
+                  darkMode ? 'bg-indigo-800/50' : 'bg-indigo-100'
+                }`}>
+                  <span className="text-2xl">🎯</span>
+                </div>
+                <div className="text-center">
+                  <p className={`text-xs font-medium uppercase tracking-wider ${
+                    darkMode ? 'text-indigo-300' : 'text-indigo-600'
+                  }`}>
+                    Análise Focada na String
+                  </p>
+                  <p className={`text-xl font-black ${
+                    darkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    "{selectedString}"
+                  </p>
+                  <p className={`text-xs ${
+                    darkMode ? 'text-indigo-300' : 'text-indigo-600'
+                  }`}>
+                    {totalIncidents} incidentes encontrados • {categoryData.length} categorias
+                  </p>
+                </div>
+                <div className={`p-2 rounded-full ${
+                  darkMode ? 'bg-purple-800/50' : 'bg-purple-100'
+                }`}>
+                  <span className="text-2xl">📊</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+
+
+
+        </div>
+
+        {/* Content */}
+        <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+          {categoryData.length === 0 ? (
+            <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">Nenhum incidente encontrado</p>
+              <p className="text-sm">
+                Não há incidentes que contenham a string "{selectedString}"
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className={`p-4 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-blue-200'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <Users className="h-5 w-5 text-blue-600" />
+                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Total
+                    </span>
+                  </div>
+                  <p className={`text-2xl font-bold mt-1 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    {totalIncidents}
+                  </p>
+                </div>
+
+                <div className={`p-4 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600' : 'bg-orange-50 border-orange-200'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <AlertCircle className="h-5 w-5 text-orange-600" />
+                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Abertos
+                    </span>
+                  </div>
+                  <p className={`text-2xl font-bold mt-1 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    {overallStatus.open}
+                  </p>
+                </div>
+
+                <div className={`p-4 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600' : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <TrendingUp className="h-5 w-5 text-red-600" />
+                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Críticos
+                    </span>
+                  </div>
+                  <p className={`text-2xl font-bold mt-1 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    {overallStatus.critical}
+                  </p>
+                </div>
+
+                <div className={`p-4 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600' : 'bg-green-50 border-green-200'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <PieChartIcon className="h-5 w-5 text-green-600" />
+                    <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Categorias
+                    </span>
+                  </div>
+                  <p className={`text-2xl font-bold mt-1 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    {categoryData.length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Todas as Categorias */}
+              <div className="flex justify-center">
+                <div className={`p-6 rounded-xl border-2 shadow-lg w-full max-w-6xl ${
+                  darkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-200'
+                }`}>
+                    {/* Legenda das categorias */}
+                    <div className={`p-3 rounded-lg ${darkMode ? 'bg-gray-600' : 'bg-gray-50'}`}>
+                      <h4 className={`text-sm font-medium mb-2 ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                        📋 Todas as Categorias:
+                      </h4>
+                      <div className="grid grid-cols-1 gap-1">
+                        {categoryData.map((category, index) => (
+                          <div 
+                            key={index}
+                            className={`flex items-center justify-between p-2 rounded cursor-pointer transition-all ${
+                              selectedCategory === category.category 
+                                ? (darkMode ? 'bg-gray-500' : 'bg-blue-100') 
+                                : (darkMode ? 'hover:bg-gray-500' : 'hover:bg-gray-100')
+                            }`}
+                            onClick={() => handleCategoryClick(category.category)}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: category.color }} 
+                              />
+                              <span className={`text-xs font-medium ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                                {category.category}
+                              </span>
+                            </div>
+                            <div className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                              {category.count} ({category.percentage.toFixed(1)}%)
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {selectedCategory && (
+                      <div className={`mt-3 p-3 rounded-lg ${darkMode ? 'bg-gray-700 border border-gray-600' : 'bg-green-50 border border-green-200'}`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className={`text-sm font-medium ${darkMode ? 'text-green-300' : 'text-green-700'}`}>
+                              📊 Categoria selecionada: {selectedCategory}
+                            </p>
+                            <p className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                              {categoryData.find(c => c.category === selectedCategory)?.count} incidentes 
+                              ({((categoryData.find(c => c.category === selectedCategory)?.count || 0) / totalIncidents * 100).toFixed(1)}%)
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setShowIncidentsList(!showIncidentsList)}
+                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                              showIncidentsList
+                                ? (darkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
+                                : (darkMode ? 'bg-gray-600 text-gray-200 hover:bg-gray-500' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
+                            }`}
+                          >
+                            {showIncidentsList ? '🙈 Ocultar' : '👁️ Ver'} Incidentes
+                          </button>
+                        </div>
+                        
+                        {/* Lista de Incidentes */}
+                        {showIncidentsList && selectedCategoryIncidents.length > 0 && (
+                          <div className={`mt-4 rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'} border ${darkMode ? 'border-gray-600' : 'border-gray-200'}`}>
+                            <div className={`p-3 border-b ${darkMode ? 'border-gray-600' : 'border-gray-200'}`}>
+                              <h4 className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                📋 Incidentes da categoria <span className={`font-bold ${darkMode ? 'text-blue-300' : 'text-blue-600'}`}>"{selectedCategory}"</span>
+                                <br/>🎯 <span className={`text-xs uppercase tracking-wide ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>Análise da String:</span> 
+                                <span className={`ml-1 px-2 py-1 rounded font-bold text-xs ${
+                                  darkMode ? 'bg-indigo-900/50 text-indigo-200' : 'bg-indigo-100 text-indigo-700'
+                                }`}>"{selectedString}"</span>
+                              </h4>
+                              <p className={`text-xs mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                💡 Clique em qualquer incidente para ver todos os detalhes
+                              </p>
+                            </div>
+                            <div className="max-h-60 overflow-y-auto">
+                              {selectedCategoryIncidents.map((incident, index) => (
+                                <div 
+                                  key={incident.number || index}
+                                  className={`p-3 border-b last:border-b-0 ${darkMode ? 'border-gray-600' : 'border-gray-100'} hover:${darkMode ? 'bg-gray-700' : 'bg-gray-50'} transition-colors cursor-pointer`}
+                                  onClick={() => handleIncidentClick(incident)}
+                                  title="Clique para ver detalhes completos do incidente"
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <p className={`text-sm font-medium ${darkMode ? 'text-blue-300' : 'text-blue-600'} hover:underline`}>
+                                        {incident.number || `Incidente ${index + 1}`} 🔍
+                                      </p>
+                                      <p className={`text-xs mt-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                        {incident.shortDescription || 'Sem descrição'}
+                                      </p>
+                                      <div className="flex items-center space-x-3 mt-2">
+                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                          incident.state === 'Open' || incident.state === 'In Progress'
+                                            ? (darkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-800')
+                                            : incident.state === 'Resolved'
+                                            ? (darkMode ? 'bg-yellow-900 text-yellow-200' : 'bg-yellow-100 text-yellow-800')
+                                            : (darkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800')
+                                        }`}>
+                                          {incident.state || 'N/A'}
+                                        </span>
+                                        {incident.priority && (
+                                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                            incident.priority.toLowerCase().includes('critical') || incident.priority.toLowerCase().includes('high')
+                                              ? (darkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-800')
+                                              : (darkMode ? 'bg-gray-900 text-gray-200' : 'bg-gray-100 text-gray-800')
+                                          }`}>
+                                            {incident.priority}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {incident.opened && (
+                                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} text-right`}>
+                                        <p>Aberto em:</p>
+                                        <p>{new Date(incident.opened).toLocaleDateString('pt-BR')}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+              </div>
+
+
+
+                      <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Análise completa para a string <span className={`font-bold px-2 py-1 rounded ${
+                          darkMode ? 'bg-indigo-900 text-indigo-200' : 'bg-indigo-100 text-indigo-700'
+                        }`}>"{selectedString}"</span>
+                      </p>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full ${
+                      darkMode ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      <span className="text-xs font-medium">{categoryData.length} categorias</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4">
+                  <div className="space-y-3">
+                    {categoryData.map((cat, index) => {
+                      const status = getStatusSummary(cat.incidents);
+                      return (
+                        <div
+                          key={index}
+                          className={`p-4 rounded-lg border ${
+                            darkMode ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center space-x-3">
+                              <div
+                                className="w-4 h-4 rounded"
+                                style={{ backgroundColor: cat.color }}
+                              />
+                              <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                {cat.category}
+                              </span>
+                              <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                ({cat.percentage.toFixed(1)}%)
+                              </span>
+                            </div>
+                            <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {cat.count} incidentes
+                            </span>
+                          </div>
+                          {/* Status Principais */}
+                          <div className="grid grid-cols-4 gap-4 text-sm mb-3">
+                            <div>
+                              <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Abertos:</span>
+                              <span className={`ml-1 font-medium ${darkMode ? 'text-orange-400' : 'text-orange-600'}`}>
+                                {status.open}
+                              </span>
+                            </div>
+                            <div>
+                              <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Resolvidos:</span>
+                              <span className={`ml-1 font-medium ${darkMode ? 'text-green-400' : 'text-green-600'}`}>
+                                {status.resolved}
+                              </span>
+                            </div>
+                            <div>
+                              <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Fechados:</span>
+                              <span className={`ml-1 font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {status.closed}
+                              </span>
+                            </div>
+                            <div>
+                              <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Críticos:</span>
+                              <span className={`ml-1 font-medium ${darkMode ? 'text-red-400' : 'text-red-600'}`}>
+                                {status.critical}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Novos Status Adicionais */}
+                          <div className="grid grid-cols-3 gap-4 text-sm mb-3">
+                            {status.pending > 0 && (
+                              <div>
+                                <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Pendentes:</span>
+                                <span className={`ml-1 font-medium ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
+                                  {status.pending}
+                                </span>
+                              </div>
+                            )}
+                            {status.cancelled > 0 && (
+                              <div>
+                                <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Cancelados:</span>
+                                <span className={`ml-1 font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                  {status.cancelled}
+                                </span>
+                              </div>
+                            )}
+                            {status.other > 0 && (
+                              <div>
+                                <span className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Outros:</span>
+                                <span className={`ml-1 font-medium ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                                  {status.other}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Status Detalhados - Para Debug */}
+                          {status.detailed && Object.keys(status.detailed).length > 0 && (
+                            <details className="mt-2">
+                              <summary className={`cursor-pointer text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} hover:${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                🔍 Ver todos os status detalhados ({Object.keys(status.detailed).length} tipos)
+                              </summary>
+                              <div className={`mt-2 p-2 rounded border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-100 border-gray-300'} text-xs`}>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {Object.entries(status.detailed).map(([state, count]) => (
+                                    <div key={state} className="flex justify-between">
+                                      <span className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{state}:</span>
+                                      <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>{count}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className={`mt-2 pt-2 border-t ${darkMode ? 'border-gray-700' : 'border-gray-300'} text-center`}>
+                                  <span className={`font-medium ${darkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
+                                    Total: {Object.values(status.detailed).reduce((sum, count) => sum + count, 0)}
+                                  </span>
+                                </div>
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+
+        {/* Modal de Detalhes do Incidente */}
+      {selectedIncident && (
+      <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-60">
+        <div className={`rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden ${
+          darkMode ? 'bg-gray-800' : 'bg-white'
+        }`}>
+          {/* Header do Modal de Detalhes */}
+          <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className={`p-2 rounded-lg ${darkMode ? 'bg-blue-900' : 'bg-blue-100'}`}>
+                  <span className="text-2xl">🔍</span>
+                </div>
+                <div>
+                  <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    Detalhes do Incidente
+                  </h2>
+                  <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {selectedIncident.number || 'Incidente sem número'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedIncident(null)}
+                className={`p-2 rounded-lg transition-colors ${
+                  darkMode 
+                    ? 'text-gray-400 hover:bg-gray-700 hover:text-white' 
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                }`}
+              >
+                ✖️
+              </button>
+            </div>
+          </div>
+
+          {/* Conteúdo do Modal de Detalhes */}
+          <div className="p-6 overflow-y-auto max-h-[70vh]">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Informações Básicas */}
+              <div className={`p-4 rounded-lg border ${
+                darkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  📋 Informações Básicas
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Número do Incidente:
+                    </label>
+                    <p className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                      {selectedIncident.number || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Descrição Resumida:
+                    </label>
+                    <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {selectedIncident.shortDescription || 'Sem descrição'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Solicitante:
+                    </label>
+                    <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {selectedIncident.caller || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Categoria:
+                    </label>
+                    <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {selectedIncident.category || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status e Prioridade */}
+              <div className={`p-4 rounded-lg border ${
+                darkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  ⚡ Status e Prioridade
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Status:
+                    </label>
+                    <div className="mt-1">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                        selectedIncident.state === 'Open' || selectedIncident.state === 'In Progress'
+                          ? (darkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-800')
+                          : selectedIncident.state === 'Resolved'
+                          ? (darkMode ? 'bg-yellow-900 text-yellow-200' : 'bg-yellow-100 text-yellow-800')
+                          : (darkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800')
+                      }`}>
+                        {selectedIncident.state || 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Prioridade:
+                    </label>
+                    <div className="mt-1">
+                      {selectedIncident.priority ? (
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                          selectedIncident.priority.toLowerCase().includes('critical') || selectedIncident.priority.toLowerCase().includes('high')
+                            ? (darkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-800')
+                            : (darkMode ? 'bg-gray-900 text-gray-200' : 'bg-gray-100 text-gray-800')
+                        }`}>
+                          {selectedIncident.priority}
+                        </span>
+                      ) : (
+                        <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          N/A
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Data de Abertura:
+                    </label>
+                    <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {selectedIncident.opened ? new Date(selectedIncident.opened).toLocaleString('pt-BR') : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Data de Resolução:
+                    </label>
+                    <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {selectedIncident.resolved ? new Date(selectedIncident.resolved).toLocaleString('pt-BR') : 'Não resolvido'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Descrição Completa e Comentários */}
+            <div className={`mt-6 p-4 rounded-lg border ${
+              darkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+            }`}>
+              <h3 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                📝 Detalhes e Comentários
+              </h3>
+              <div className="space-y-4">
+                {selectedIncident.shortDescription && (
+                  <div>
+                    <label className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Descrição Resumida:
+                    </label>
+                    <div className={`mt-2 p-3 rounded border ${
+                      darkMode ? 'bg-gray-800 border-gray-600 text-gray-300' : 'bg-white border-gray-200 text-gray-700'
+                    } text-sm whitespace-pre-wrap`}>
+                      {selectedIncident.shortDescription}
+                    </div>
+                  </div>
+                )}
+                {selectedIncident.commentsAndWorkNotes && (
+                  <div>
+                    <label className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Comentários e Notas de Trabalho:
+                    </label>
+                    <div className={`mt-2 p-3 rounded border ${
+                      darkMode ? 'bg-gray-800 border-gray-600 text-gray-300' : 'bg-white border-gray-200 text-gray-700'
+                    } text-sm whitespace-pre-wrap max-h-40 overflow-y-auto`}>
+                      {selectedIncident.commentsAndWorkNotes}
+                    </div>
+                  </div>
+                )}
+                {!selectedIncident.shortDescription && !selectedIncident.commentsAndWorkNotes && (
+                  <div className={`text-center py-8 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <p className="text-sm">Nenhum detalhe adicional disponível</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Botão para Fechar */}
+            <div className="mt-6 flex items-center justify-center">
+              <button
+                onClick={() => setSelectedIncident(null)}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                  darkMode 
+                    ? 'bg-gray-600 text-white hover:bg-gray-500' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                ✖️ Fechar Detalhes
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+    </div>
+  );
+};
